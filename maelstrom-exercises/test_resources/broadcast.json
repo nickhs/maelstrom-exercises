@@ -1,0 +1,9 @@
+{
+    "src": "c0",
+    "dest": "n0",
+    "body": {
+      "type": "broadcast",
+      "msg_id": 1,
+      "message": 1000
+    }
+  }

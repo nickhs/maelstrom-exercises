@@ -1,0 +1,9 @@
+{
+    "body": {
+        "type":     "topology_ok",
+        "msg_id":   2,
+        "in_reply_to": 1
+    },
+    "src": "n0",
+    "dest": "c0"
+}
