@@ -2,8 +2,8 @@
     "body": {
         "type":     "init",
         "msg_id":   1,
-        "node_id":  "n3",
-        "node_ids": ["n1", "n2", "n3"]
+        "node_id":  "n0",
+        "node_ids": ["n0", "n2", "n3"]
     },
     "src": "c0",
     "dest": "n0"

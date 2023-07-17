@@ -14,8 +14,7 @@ import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import Control.Concurrent.STM (TQueue, TVar, TMVar)
 import Read (ReadPayload (ReadPayload))
-import Control.Concurrent.STM.TSem (TSem)
-import qualified Control.Concurrent.Map as CMap
+import Data.ByteString (ByteString)
 
 data IncomingMessages =
     E Echo
@@ -61,15 +60,17 @@ instance FromJSON Messages where
 instance FromJSON OutgoingMessages where
     parseJSON jsonVal = do
         -- FIXME(nhs): this feels bad?
-        (Response r) <- parseMessageJSON jsonVal
-        pure r
+        x <- parseMessageJSON jsonVal
+        case x of
+            (Response r) -> pure r
+            _ -> fail "not an outgoing message"
 
 instance FromJSON IncomingMessages where
     parseJSON jsonVal = do
-        -- FIXME(nhs): this feels bad?
-        (Incoming r) <- parseMessageJSON jsonVal
-        pure r
-
+        x <- parseMessageJSON jsonVal
+        case x of
+            (Incoming r) -> pure r
+            (Response _r) -> fail "not an incoming message"
 
 toPairs :: OutgoingMessages -> [Pair]
 toPairs (EchoOk (Echo payload)) = ["echo" .= payload]
@@ -108,5 +109,6 @@ data Context = Context {
     meId :: NodeId, -- make a better type
     serverMsgId :: TVar Int, -- incrementing message id count
     neighbours :: Map NodeId NeighbourState,
-    messages :: Set.Set Int -- all broadcast message contents we've seen to date
+    messages :: Set.Set Int, -- all broadcast message contents we've seen to date
+    writeQueue :: TQueue ByteString -- all messages to be send out
 }

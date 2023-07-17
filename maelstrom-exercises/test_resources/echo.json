@@ -1,6 +1,6 @@
 {
   "src": "c1",
-  "dest": "n1",
+  "dest": "n0",
   "body": {
     "type": "echo",
     "msg_id": 1,

@@ -1,19 +1,21 @@
 module Handler where
-import Lib (Context(Context), IncomingMessages(..), OutgoingMessages(..), meId, neighbours, serverMsgId, messages, getUUID, NeighbourState (NeighbourState, inflightMessage, messagesToSend))
+import Lib (Context(Context, writeQueue), IncomingMessages(..), OutgoingMessages(..), meId, neighbours, serverMsgId, messages, getUUID, NeighbourState (NeighbourState, inflightMessage, messagesToSend))
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Control.Concurrent.STM (atomically, writeTQueue, newEmptyTMVarIO)
 import Control.Concurrent.STM.TQueue (newTQueueIO)
-import Control.Concurrent.Async (async)
+import Control.Concurrent.Async (async, link)
 import Data.Foldable (forM_)
 import Control.Monad (forM)
 import Init (InitPayload(InitPayload))
 import Generate (GeneratePayload(GeneratePayload))
 import Topology (TopologyPayload (TopologyPayload))
-import Broadcast (BroadcastPayload (BroadcastPayload), broadcastMessage)
+import Broadcast (BroadcastPayload (BroadcastPayload))
 import Data.UUID ( toText )
 import Messaging (nodeSender)
 import Read (ReadPayload(ReadPayload))
+import Data.Maybe (fromMaybe)
+import qualified Data.Text as T
 
 mkNeighbourState :: IO NeighbourState
 mkNeighbourState = do
@@ -24,28 +26,27 @@ mkNeighbourState = do
         messagesToSend
     }
 
-handler :: Context -> IncomingMessages -> IO (Context, OutgoingMessages)
-handler ctx (E payload) = pure (ctx, EchoOk payload)
-handler ctx (Init (InitPayload nodeId nodeIds)) = do
+handler :: Context -> T.Text -> IncomingMessages -> IO (Context, OutgoingMessages)
+handler ctx _ (E payload) = pure (ctx, EchoOk payload)
+handler ctx _ (Init (InitPayload nodeId _nodeIds)) = do
     let newCtx = ctx { meId = nodeId }
     pure (newCtx, InitOk)
-handler ctx Generate = do
+handler ctx _ Generate = do
     uuid <- toText <$> getUUID ctx
     pure (ctx, GenerateOk $ GeneratePayload uuid)
-handler ctx@(Context { serverMsgId, meId }) (Topology (TopologyPayload topo)) = do
-    -- add everyone as my neighbour
-    let myNeighbours = Set.toList $ Set.delete meId $ Set.fromList $ concat $ Map.elems topo
-    -- if I want to be smarter about this
-    -- let myNeighbours = fromMaybe [] (Map.lookup (meId ctx) topo)
-    tqueues <- zip myNeighbours <$> mapM (const mkNeighbourState) [0..length myNeighbours]
-    -- forConcurrently_ tqueues (uncurry (nodeSender (serverMsgId, meId)))
+handler ctx@(Context { serverMsgId, meId, writeQueue }) _ (Topology (TopologyPayload topo)) = do
+    let myNeighbours = fromMaybe [] (Map.lookup meId topo)
 
+    tqueues <- zip myNeighbours <$> mapM (const mkNeighbourState) [0..length myNeighbours]
     -- this is so bad but idc anymore FIXME
-    asyncHandles <- forM tqueues (\(toNodeId, tqueue) -> async $ nodeSender (serverMsgId, meId) toNodeId tqueue)
+    _asyncHandles <- forM tqueues (\(toNodeId, tqueue) -> do
+        thread <- async $ nodeSender (serverMsgId, meId, writeQueue) toNodeId tqueue
+        link thread
+        pure thread)
 
     let inited = Map.fromList tqueues
     pure (ctx { neighbours = inited }, TopologyOk)
-handler ctx@(Context { neighbours, messages }) (Broadcast bp@(BroadcastPayload message)) = do
+handler ctx@(Context { neighbours, messages }) srcNode (Broadcast bp@(BroadcastPayload message)) = do
     if Set.member message messages
     -- if we've already seen the message then don't broadcast further
     then pure (ctx, BroadcastOk)
@@ -54,8 +55,10 @@ handler ctx@(Context { neighbours, messages }) (Broadcast bp@(BroadcastPayload m
         let newCtx = ctx { messages = Set.insert message messages }
         -- we need to write to each neighbour now to let them know!
         -- but only if this is the first time seeing this value
-        forM_ (Map.elems neighbours) (\(NeighbourState { messagesToSend }) -> 
+        -- FIXME except the neighbour we got this message from, they know obvi
+        let toTell = map snd $ filter (\(nodeId, _) -> nodeId /= srcNode) $ Map.toList neighbours
+        forM_ toTell (\(NeighbourState { messagesToSend }) -> 
             atomically (writeTQueue messagesToSend bp))
         -- and then we're done?
         pure (newCtx, BroadcastOk)
-handler ctx@(Context { messages }) Read = pure (ctx, ReadOk $ ReadPayload $ Set.toList messages)
+handler ctx@(Context { messages }) _ Read = pure (ctx, ReadOk $ ReadPayload $ Set.toList messages)

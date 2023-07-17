@@ -1,5 +1,5 @@
 {
-    "src": "n1",
+    "src": "n0",
     "dest": "c1",
     "body": {
         "type": "echo_ok",
