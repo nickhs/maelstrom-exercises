@@ -23,3 +23,5 @@ To run the actual maelstrom tests
 
 	$ stack install
 	$ ../maelstrom/maelstrom test -w broadcast --bin maelstrom-exercises-exe --rate 100 --time-limit 2 # for example
+
+You'll likely need to grab [the maelstrom binary and jars from Github](https://github.com/jepsen-io/maelstrom/releases/tag/v0.2.3)
