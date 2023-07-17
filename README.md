@@ -1,7 +1,7 @@
 # `maelstrom-exercises`
 
 Contains my (poor) attempts at working through [Jepsen's maelstrom exercises - a workbench for learning distributed systems by writing your own](https://github.com/jepsen-io/maelstrom).
-I'm using Haskell and Control.Concurrent.Async + software transactional memory to muddle my way through.
+I'm using Haskell and [Control.Concurrent.Async + software transactional memory](https://www.oreilly.com/library/view/parallel-and-concurrent/9781449335939/) to muddle my way through.
 
 Should not be used as example code for anything - very messy.
 
