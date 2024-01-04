@@ -13,7 +13,6 @@ import Server (handleLine)
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import Control.Concurrent.STM (newTVarIO, newTQueueIO, readTQueue, atomically)
-import Data.Knob (newKnob, newFileHandle, getContents)
 import GHC.IO.IOMode (IOMode(WriteMode))
 
 fakeUUID :: IO UUID.UUID
