@@ -9,18 +9,18 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         hPkgs =
-          pkgs.haskell.packages."ghc927"; # need to match Stackage LTS version
+          pkgs.haskell.packages."ghc963"; # need to match Stackage LTS version
                                            # from stack.yaml resolver
 
         myDevTools = [
           hPkgs.ghc # GHC compiler in the desired version (will be available on PATH)
-          hPkgs.ghcid # Continuous terminal Haskell compile checker
-          hPkgs.ormolu # Haskell formatter
+          # hPkgs.ghcid # Continuous terminal Haskell compile checker
+          # hPkgs.ormolu # Haskell formatter
           hPkgs.hlint # Haskell codestyle checker
-          hPkgs.hoogle # Lookup Haskell documentation
+          # hPkgs.hoogle # Lookup Haskell documentation
           hPkgs.haskell-language-server # LSP server for editor
-          hPkgs.implicit-hie # auto generate LSP hie.yaml file from cabal
-          hPkgs.retrie # Haskell refactoring tool
+          # hPkgs.implicit-hie # auto generate LSP hie.yaml file from cabal
+          # hPkgs.retrie # Haskell refactoring tool
           hPkgs.haskell-dap
           hPkgs.haskell-debug-adapter
           # hPkgs.cabal-install
