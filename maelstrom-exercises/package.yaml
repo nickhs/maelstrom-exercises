@@ -30,6 +30,9 @@ dependencies:
 - stm
 - async
 - ctrie
+- vector
+- reflection
+- tagged
 
 ghc-options:
 - -Wall
@@ -49,6 +52,9 @@ default-extensions:
 - NamedFieldPuns
 - OverloadedRecordDot
 - ScopedTypeVariables
+- FlexibleContexts
+# - RankNTypes
+- UndecidableInstances # for reflection lib
 # - RebindableSyntax
 
 library:

@@ -5,15 +5,13 @@ import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString as BS
 
-import Messaging (payload, body, MsgEnvelope, MsgBodyReply)
 import qualified Data.UUID as UUID
 import Lib
-    ( Context(Context, getUUID, serverMsgId, meId, neighbours, messages, writeQueue))
-import Server (handleLine)
+    ( Context(Context, getUUID, serverMsgId, meId, neighbours, messages, writeQueue, messageTypeMap), broadcastTypeMap)
+import Server ( handleLine, jsonDecode )
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 import Control.Concurrent.STM (newTVarIO, newTQueueIO, readTQueue, atomically)
-import GHC.IO.IOMode (IOMode(WriteMode))
 
 fakeUUID :: IO UUID.UUID
 fakeUUID = pure UUID.nil
@@ -26,18 +24,20 @@ main = runTestTTAndExit tests
             _ <- parserTest x -- send to void instead?
             return ()) ["echo", "init", "generate"]
 
+extractEither :: (Show a, MonadFail m) => Either a b -> m b
+extractEither (Left err) = fail (show err)
+extractEither (Right v) = pure v
+
 parserTestWithContext :: Context -> String -> IO Context
 parserTestWithContext ctx name = do
     inp1 <- BSL.readFile ("test_resources/" <> name <> ".json")
     newCtx <- handleLine ctx inp1
 
-    exp1 <- JSON.eitherDecode <$> BSL.readFile ("test_resources/" <> name <> "_ok.json")
-    (expectedOut :: MsgEnvelope MsgBodyReply) <- case exp1 of
-        Left err -> error err
-        Right x -> pure x
+    expectedOut <- BSL.readFile ("test_resources/" <> name <> "_ok.json") >>= extractEither . jsonDecode ctx
 
     msg <- atomically $ readTQueue (writeQueue ctx)
-    let myOut1 = (JSON.eitherDecode . BS.fromStrict) msg
+    -- let myOut1 = (JSON.eitherDecode . BS.fromStrict) msg
+    let myOut1 = jsonDecode ctx $ BS.fromStrict msg
     myOut <- case myOut1 of
         Left err -> error err
         Right x -> pure x
@@ -60,7 +60,8 @@ testContext = do
         meId = "n0",
         neighbours = Map.empty,
         messages = Set.empty,
-        writeQueue = writeQueue
+        writeQueue = writeQueue,
+        messageTypeMap = broadcastTypeMap
     }
 
     pure ctx

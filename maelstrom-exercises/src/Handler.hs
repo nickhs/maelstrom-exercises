@@ -6,7 +6,7 @@ import Control.Concurrent.STM (atomically, writeTQueue, newEmptyTMVarIO)
 import Control.Concurrent.STM.TQueue (newTQueueIO)
 import Control.Concurrent.Async (async, link)
 import Data.Foldable (forM_)
-import Control.Monad (forM)
+import Control.Monad (forM, when)
 import Init (InitPayload(InitPayload))
 import Generate (GeneratePayload(GeneratePayload))
 import Topology (TopologyPayload (TopologyPayload))
@@ -46,19 +46,22 @@ handler ctx@(Context { serverMsgId, meId, writeQueue }) _ (Topology (TopologyPay
 
     let inited = Map.fromList tqueues
     pure (ctx { neighbours = inited }, TopologyOk)
-handler ctx@(Context { neighbours, messages }) srcNode (Broadcast bp@(BroadcastPayload message)) = do
-    if Set.member message messages
-    -- if we've already seen the message then don't broadcast further
-    then pure (ctx, BroadcastOk)
-    -- otherwise add to our messages and tell all my neighbours!
-    else do
-        let newCtx = ctx { messages = Set.insert message messages }
+handler ctx@(Context { neighbours, messages }) srcNode (Broadcast (BroadcastPayload message)) = do
+    -- we need to send all broadcast ids we haven't seen yet
+    -- find everything in message thats not in messages
+    let incomingMessageSet = Set.fromList message
+    let newCtx = ctx { messages = Set.union incomingMessageSet messages }
+
+    let toBroadcast = Set.difference incomingMessageSet messages
+    when (length toBroadcast > 0) $ do
         -- we need to write to each neighbour now to let them know!
-        -- but only if this is the first time seeing this value
-        -- FIXME except the neighbour we got this message from, they know obvi
+        -- don't tell the person who just told us
         let toTell = map snd $ filter (\(nodeId, _) -> nodeId /= srcNode) $ Map.toList neighbours
-        forM_ toTell (\(NeighbourState { messagesToSend }) -> 
-            atomically (writeTQueue messagesToSend bp))
-        -- and then we're done?
-        pure (newCtx, BroadcastOk)
+        forM_ toTell (\(NeighbourState { messagesToSend }) ->
+            atomically (writeTQueue messagesToSend toBroadcast))
+
+    -- and then we're done?
+    pure (newCtx, BroadcastOk)
 handler ctx@(Context { messages }) _ Read = pure (ctx, ReadOk $ ReadPayload $ Set.toList messages)
+handler _ _ (RaftRead _) = undefined
+handler _ _ (RaftWrite _) = undefined

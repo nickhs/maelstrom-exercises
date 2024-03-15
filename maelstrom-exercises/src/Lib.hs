@@ -1,76 +1,97 @@
 module Lib where
 
-import Data.Aeson (FromJSON, withObject, (.:), (.=))
+import Broadcast (BroadcastPayload, broadcastMessage)
+import Control.Concurrent.STM (TMVar, TQueue, TVar)
+import Data.Aeson (withObject, (.:), (.=))
 import qualified Data.Aeson as JSON
-import Data.Aeson.Types (FromJSON(parseJSON), Pair, Parser)
-import Data.UUID ( UUID )
-import Echo (Echo(Echo))
-import Init (InitPayload)
-import Generate (GeneratePayload(GeneratePayload))
-import qualified Data.Text as T
-import Topology (TopologyPayload)
-import Broadcast (broadcastMessage, BroadcastPayload)
-import qualified Data.Set as Set
-import Data.Map.Strict (Map)
-import Control.Concurrent.STM (TQueue, TVar, TMVar)
-import Read (ReadPayload (ReadPayload))
+import Data.Aeson.Types (FromJSON (parseJSON), Pair, Parser)
 import Data.ByteString (ByteString)
+import Data.Map.Strict (Map)
+import Data.Proxy (Proxy (Proxy))
+import Data.Reflection (Reifies, reflect)
+import qualified Data.Set as Set
+import Data.Tagged (Tagged(Tagged))
+import qualified Data.Text as T
+import Data.UUID (UUID)
+import Echo (Echo (Echo))
+import Generate (GeneratePayload (GeneratePayload))
+import Init (InitPayload)
+import Read (ReadPayload (ReadPayload))
+import Topology (TopologyPayload)
+import Raft.Read (ReadPayload, ReadPayloadOk)
+import Raft.Write (WritePayload)
 
-data IncomingMessages =
-    E Echo
-    | Init InitPayload
-    | Generate
-    | Topology TopologyPayload
-    | Broadcast BroadcastPayload
-    | Read
-    deriving (Show, Eq)
+data IncomingMessages
+  = E Echo
+  | Init InitPayload
+  | Generate
+  | Topology TopologyPayload
+  | Broadcast BroadcastPayload
+  | Read
+  | RaftRead Raft.Read.ReadPayload
+  | RaftWrite WritePayload
+  deriving (Show, Eq)
 
-data OutgoingMessages =
-    EchoOk Echo
-    | InitOk
-    | GenerateOk GeneratePayload
-    | TopologyOk
-    | BroadcastOk
-    | ReadOk ReadPayload
-    deriving (Show, Eq)
+data OutgoingMessages
+  = EchoOk Echo
+  | InitOk
+  | GenerateOk GeneratePayload
+  | TopologyOk
+  | BroadcastOk
+  | ReadOk Read.ReadPayload
+  | RaftReadOk Raft.Read.ReadPayloadOk
+  deriving (Show, Eq)
 
-data Messages = Incoming IncomingMessages | Response OutgoingMessages deriving (Show, Eq)
+type MsgTypeMap a = JSON.Value -> String -> Parser a
+data MessageTypeMaps = TypeMaps (MsgTypeMap IncomingMessages) (MsgTypeMap OutgoingMessages)
 
-parseMessageJSON :: JSON.Value -> Parser Messages
-parseMessageJSON jsonVal = withObject "Message" (\o -> do
+mkParserFromTypeMap :: MsgTypeMap a -> JSON.Value -> Parser a
+mkParserFromTypeMap typeMap jsonVal =
+  withObject
+    "Message"
+    ( \o -> do
         typ <- o .: "type"
-        case typ of
-            "echo" -> Incoming . E <$> parseJSON jsonVal
-            "init" -> Incoming . Init <$> parseJSON jsonVal
-            "generate" -> pure $ Incoming Generate
-            "topology" -> Incoming . Topology <$> parseJSON jsonVal
-            "broadcast" -> Incoming . Broadcast <$> parseJSON jsonVal
-            "read" -> pure $ Incoming Read
-            "echo_ok" -> Response . EchoOk <$> parseJSON jsonVal
-            "init_ok" -> pure $ Response InitOk
-            "generate_ok" -> Response . GenerateOk <$> parseJSON jsonVal
-            "topology_ok" -> pure $ Response TopologyOk
-            "broadcast_ok" -> pure $ Response BroadcastOk
-            _ -> fail $ "unknown type " <> typ) jsonVal
+        typeMap jsonVal typ
+    )
+    jsonVal
 
+broadcastInputTypeMap :: MsgTypeMap IncomingMessages
+broadcastInputTypeMap jsonVal typ = case typ of
+  "echo" -> E <$> parseJSON jsonVal
+  "init" -> Init <$> parseJSON jsonVal
+  "generate" -> pure Generate
+  "topology" -> Topology <$> parseJSON jsonVal
+  "broadcast" -> Broadcast <$> parseJSON jsonVal
+  "read" -> pure Read
+  _ -> fail $ "unknown input type " <> typ
 
-instance FromJSON Messages where
-    parseJSON = parseMessageJSON
+broadcastOutputMap :: MsgTypeMap OutgoingMessages
+broadcastOutputMap jsonVal "echo_ok" = EchoOk <$> parseJSON jsonVal
+broadcastOutputMap _ "init_ok" = pure InitOk
+broadcastOutputMap jsonVal "generate_ok" = GenerateOk <$> parseJSON jsonVal
+broadcastOutputMap _ "topology_ok" = pure TopologyOk
+broadcastOutputMap _ "broadcast_ok" = pure BroadcastOk
+broadcastOutputMap _ typ = fail $ "unknown output type " <> typ
 
-instance FromJSON OutgoingMessages where
-    parseJSON jsonVal = do
-        -- FIXME(nhs): this feels bad?
-        x <- parseMessageJSON jsonVal
-        case x of
-            (Response r) -> pure r
-            _ -> fail "not an outgoing message"
+broadcastTypeMap :: MessageTypeMaps
+broadcastTypeMap = TypeMaps broadcastInputTypeMap broadcastOutputMap
 
-instance FromJSON IncomingMessages where
-    parseJSON jsonVal = do
-        x <- parseMessageJSON jsonVal
-        case x of
-            (Incoming r) -> pure r
-            (Response _r) -> fail "not an incoming message"
+raftInputTypeMap :: MsgTypeMap IncomingMessages
+raftInputTypeMap jsonVal "read" = RaftRead <$> parseJSON jsonVal
+
+instance {-# OVERLAPPING #-} (Reifies m (MessageTypeMaps)) => JSON.FromJSON (Tagged m IncomingMessages) where
+  parseJSON jsonVal = do
+    let (TypeMaps typeMap _) :: MessageTypeMaps = reflect (Proxy :: Proxy m)
+    let parser = mkParserFromTypeMap typeMap
+    x <- parser jsonVal
+    pure $ Tagged x
+
+instance {-# OVERLAPPING #-} (Reifies m (MessageTypeMaps)) => JSON.FromJSON (Tagged m OutgoingMessages) where
+  parseJSON jsonVal = do
+    let (TypeMaps _ typeMap) :: MessageTypeMaps = reflect (Proxy :: Proxy m)
+    let parser = mkParserFromTypeMap typeMap
+    x <- parser jsonVal
+    pure $ Tagged x
 
 toPairs :: OutgoingMessages -> [Pair]
 toPairs (EchoOk (Echo payload)) = ["echo" .= payload]
@@ -78,7 +99,7 @@ toPairs InitOk = []
 toPairs (GenerateOk (GeneratePayload payload)) = ["id" .= payload]
 toPairs TopologyOk = []
 toPairs BroadcastOk = []
-toPairs (ReadOk (ReadPayload payload))= ["messages" .= payload]
+toPairs (ReadOk (ReadPayload payload)) = ["messages" .= payload]
 
 toPairs2 :: IncomingMessages -> [Pair]
 toPairs2 (Broadcast payload) = ["message" .= broadcastMessage payload]
@@ -97,18 +118,38 @@ messageTypeMapOut2 (Broadcast _) = "broadcast"
 messageTypeMapOut2 _ = error "wat"
 
 type NodeId = T.Text
+
 type ServerMessageId = TVar Int
 
-data NeighbourState = NeighbourState {
-    messagesToSend :: TQueue BroadcastPayload,
+data NeighbourState = NeighbourState
+  { messagesToSend :: TQueue (Set.Set Int),
     inflightMessage :: TMVar Int -- this is the message id I'm waiting for an ack on
+  }
+
+data UUIDCtx = UUIDCtx {
+    getUUID :: IO UUID
 }
 
-data Context = Context {
-    getUUID :: IO UUID,
-    meId :: NodeId, -- make a better type
+data RaftCtx = RaftCtx { 
+    currentTerm :: Int,
+    votedFor :: Maybe NodeId
+}
+
+data OperatingModes = 
+    UUIDServer UUIDCtx 
+    | BroadcastServer
+    | RaftServer RaftCtx
+
+messageTypeMapLookup :: OperatingModes -> MessageTypeMaps
+messageTypeMapLookup (UUIDServer  _) = TypeMaps broadcastInputTypeMap broadcastOutputMap
+messageTypeMapLookup BroadcastServer = TypeMaps broadcastInputTypeMap broadcastOutputMap
+messageTypeMapLookup (RaftServer _) = TypeMaps broadcastInputTypeMap broadcastOutputMap
+
+data Context = Context
+  { meId :: NodeId, -- make a better type
     serverMsgId :: TVar Int, -- incrementing message id count
     neighbours :: Map NodeId NeighbourState,
     messages :: Set.Set Int, -- all broadcast message contents we've seen to date
-    writeQueue :: TQueue ByteString -- all messages to be send out
-}
+    writeQueue :: TQueue ByteString, -- all messages to be send out
+    messageTypeMap :: MessageTypeMaps -- how to parse the incoming messages
+  }

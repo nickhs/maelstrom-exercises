@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.35.2.
+-- This file has been generated from package.yaml by hpack version 0.36.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -32,6 +32,10 @@ library
       Init
       Lib
       Messaging
+      Raft.Cas
+      Raft.Read
+      Raft.RequestVote
+      Raft.Write
       Read
       Server
       Topology
@@ -46,6 +50,8 @@ library
       NamedFieldPuns
       OverloadedRecordDot
       ScopedTypeVariables
+      FlexibleContexts
+      UndecidableInstances
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       aeson
@@ -54,10 +60,13 @@ library
     , bytestring
     , containers
     , ctrie
+    , reflection
     , stm
+    , tagged
     , text
     , unordered-containers
     , uuid
+    , vector
   default-language: Haskell2010
 
 executable maelstrom-exercises-exe
@@ -73,6 +82,8 @@ executable maelstrom-exercises-exe
       NamedFieldPuns
       OverloadedRecordDot
       ScopedTypeVariables
+      FlexibleContexts
+      UndecidableInstances
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
@@ -82,10 +93,13 @@ executable maelstrom-exercises-exe
     , containers
     , ctrie
     , maelstrom-exercises
+    , reflection
     , stm
+    , tagged
     , text
     , unordered-containers
     , uuid
+    , vector
   default-language: Haskell2010
 
 test-suite maelstrom-exercises-test
@@ -102,6 +116,8 @@ test-suite maelstrom-exercises-test
       NamedFieldPuns
       OverloadedRecordDot
       ScopedTypeVariables
+      FlexibleContexts
+      UndecidableInstances
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       HUnit
@@ -112,8 +128,11 @@ test-suite maelstrom-exercises-test
     , containers
     , ctrie
     , maelstrom-exercises
+    , reflection
     , stm
+    , tagged
     , text
     , unordered-containers
     , uuid
+    , vector
   default-language: Haskell2010

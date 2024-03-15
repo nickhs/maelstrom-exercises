@@ -1,6 +1,6 @@
 module Main (main) where
 import Server (startServer)
-import Lib (Context(Context, serverMsgId, getUUID, messages, neighbours, meId, writeQueue))
+import Lib (Context(Context, serverMsgId, getUUID, messages, neighbours, meId, writeQueue, messageTypeMap), broadcastTypeMap)
 import Data.UUID.V4 (nextRandom)
 import qualified Data.Set as Set
 import qualified Data.Map as Map
@@ -33,5 +33,6 @@ main = do
         meId = "",
         messages = Set.empty,
         neighbours = Map.empty,
-        writeQueue = writeQueue
+        writeQueue = writeQueue,
+        messageTypeMap = broadcastTypeMap
     }
