@@ -3,6 +3,7 @@ module Server where
 import Control.Concurrent.STM (atomically, modifyTVar', readTVar, tryReadTMVar, tryTakeTMVar, writeTQueue)
 import Control.Monad (unless, when)
 import qualified Data.Aeson as JSON
+import qualified Data.Aeson.Types as JSON
 import Data.ByteString (toStrict)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Data (Proxy (Proxy))
@@ -11,9 +12,23 @@ import Data.Reflection (reify)
 import Data.Tagged (Tagged (Tagged))
 import Debug.Trace (traceM)
 import Handler (handler)
-import Lib
+import Lib (Route, Context(Context), meId, serverMsgId, neighbours, inflightMessage, writeQueue, reqParser, RouteData(RouteData), rdReqParser)
 import Messaging (MsgBody (MsgBody), MsgBodyReply (MsgBodyReply), MsgEnvelope (MsgEnvelope, dest), Msgs (MsgReply, MsgReq), body)
 import System.IO (hPutStrLn, stderr)
+import Messaging (IncomingMessages(..))
+import Workload (Workload, getContext)
+import Init (InitPayload)
+
+{-
+initialize :: OperatingMode -> IO ()
+initialize UUIDServer = do
+  context <- initializeCommon
+  let uuidCtx = UUIDCtx {
+    context = context,
+    getUUID = nextRandom
+  }
+  concurrently_ (startServer (ctx msgId writeQueue)) (queueWriter writeQueue)
+-}
 
 reply :: Context -> MsgEnvelope (MsgBody IncomingMessages) -> IO (Context, MsgEnvelope MsgBodyReply)
 reply context (MsgEnvelope recvSrc _ (MsgBody incomingMsgId body)) = do
@@ -58,9 +73,31 @@ handleResponse context (MsgEnvelope src _ msg@(MsgBodyReply inReplyTo _)) = do
 ensureForMe :: Context -> MsgEnvelope a -> Bool
 ensureForMe (Context {meId = meId}) (MsgEnvelope {dest = dest}) = meId == dest || meId == ""
 
+{-
+handle :: Route r => r -> BSL.ByteString -> Either String (MsgEnvelope (MsgBody r))
+handle routes line = do
+  -- is it valid json?
+  (value :: JSON.Value) <- JSON.eitherDecode line
+
+  -- can we parse it into a route?
+  let x = map reqParser routes
+  let (JSON.Success a) = mconcat $ map (\p -> JSON.parse p value) x
+  undefined
+-}
+
+jsonDecode2 :: [RouteData] -> BSL.ByteString -> Either String (MsgEnvelope a)
+jsonDecode2 routes line = do
+  (jsonVal :: JSON.Value) <- JSON.eitherDecode line
+  let result = map (tryParse jsonVal) routes
+  undefined
+  where
+    tryParse jsonVal (RouteData { rdReqParser }) = rdReqParser jsonVal
+
+
 jsonDecode :: Context -> BSL.ByteString -> Either String (MsgEnvelope Msgs)
 jsonDecode ctx line = do
-  let typeMaps = messageTypeMap ctx
+  -- let typeMaps = messageTypeMap ctx
+  let typeMaps = undefined
   reify
     typeMaps
     ( \(Proxy :: Proxy m) -> do
@@ -71,8 +108,8 @@ jsonDecode ctx line = do
           Left err -> Left err
     )
 
-handleLine :: Context -> BSL.ByteString -> IO Context
-handleLine serverContext line = case jsonDecode serverContext line of
+handleLine :: Workload -> BSL.ByteString -> IO Workload
+handleLine workload line = case jsonDecode serverContext line of
   Right msg@(MsgEnvelope _ _ msgBody) -> do
     -- traceM $ "got msg! " ++ show msg
     -- ignore messages not for me
@@ -85,22 +122,27 @@ handleLine serverContext line = case jsonDecode serverContext line of
         (newCtx, result) <- reply serverContext typedMsg
         let resultRaw = toStrict $ JSON.encode result
         atomically $ writeTQueue (writeQueue serverContext) resultRaw
-        pure newCtx
+        undefined
+        -- pure newCtx
       (MsgReply body) -> do
         let typedMsg = msg {body}
         -- when we get a response back, we need to find the thread
         -- that is serving that message queue and let them know
         -- otherwise they will keep retrying
         handleResponse serverContext typedMsg
-        pure serverContext
+        undefined
+        -- pure serverContext
   Left err -> do
-    hPutStrLn stderr $ "could not parse err: " <> err <> " for line " <> (BSL.unpack line)
-    pure serverContext
+    hPutStrLn stderr $ "could not parse err: " <> err <> " for line " <> BSL.unpack line
+    -- pure serverContext
+    undefined
+  where
+    serverContext = getContext workload
 
-startServer :: Context -> IO ()
-startServer serverContext = do
+startServer :: Workload -> IO ()
+startServer workload = do
   -- we listen for msgs on stdin
   -- I guess we just assume they are newline seperated?
   line <- getLine
-  newCtx <- handleLine serverContext (BSL.pack line)
+  newCtx <- handleLine workload (BSL.pack line)
   startServer newCtx

@@ -14,8 +14,17 @@ import qualified Data.Set as Set
 import Data.Tagged (Tagged (Tagged), unTagged)
 import qualified Data.Text as T
 import GHC.Generics
-import Lib (IncomingMessages (Broadcast), MessageTypeMaps, NeighbourState (NeighbourState), NodeId, OutgoingMessages, ServerMessageId, messageTypeMapOut, messageTypeMapOut2, toPairs, toPairs2)
 import System.Timeout (timeout)
+import Data.Aeson.Types (Pair)
+import Data.Proxy (Proxy (Proxy))
+import Data.Reflection (reflect)
+import Echo (Echo (Echo))
+import Generate (GeneratePayload (GeneratePayload))
+-- import Init (InitPayload)
+import Read (ReadPayload (ReadPayload))
+import Topology (TopologyPayload)
+import Raft.Read (ReadPayload, ReadPayloadOk)
+import Raft.Write (WritePayload)
 
 data MsgEnvelope a = MsgEnvelope
   { src :: T.Text,
@@ -94,57 +103,99 @@ instance {-# OVERLAPPING #-} (Reifies m MessageTypeMaps) => FromJSON (Tagged m M
       )
       jsonVal
 
--- responsible for sending messages to other nodes in the cluster
--- and ensuring we get a response
--- a message on the workqueue is a message we need to send out
--- each work queue is scoped to a single neighbour (all messages are for one neighbour)
--- and a message type???
-nodeSender :: (ServerMessageId, NodeId, TQueue ByteString) -> NodeId -> NeighbourState -> IO ()
-nodeSender (msgCounter, senderNodeId, writeQueue) toNodeId ns@(NeighbourState workQueue inflightMessage) = do
-  (payload, _msgCount, _msg) <- atomically $ do
-    -- precheck
-    hasInflight <- not <$> isEmptyTMVar inflightMessage
-    when hasInflight (error "should not happen")
+data IncomingMessages
+  = E Echo
+  -- | Init InitPayload
+  | Generate
+  | Topology TopologyPayload
+  | Broadcast BroadcastPayload
+  | Read
+  | RaftRead Raft.Read.ReadPayload
+  | RaftWrite WritePayload
+  deriving (Show, Eq)
 
-    -- get a new msg to process
-    msgs <- flushTQueue workQueue
-    let allMsgs = foldl' Set.union Set.empty msgs
-    let msg = BroadcastPayload $ Set.toList allMsgs
-    modifyTVar' msgCounter (+ 1)
-    msgCount <- readTVar msgCounter
-    putTMVar inflightMessage msgCount
-    -- traceM $ "got msg id " ++ show msgCount
-    let req = MsgBody msgCount (Broadcast msg)
-    let out = MsgEnvelope senderNodeId toNodeId req
-    let outRaw = toStrict $ JSON.encode out
-    writeTQueue writeQueue outRaw
-    pure (allMsgs, msgCount, out)
+data OutgoingMessages
+  = EchoOk Echo
+  | InitOk
+  | GenerateOk GeneratePayload
+  | TopologyOk
+  | BroadcastOk
+  | ReadOk Read.ReadPayload
+  | RaftReadOk Raft.Read.ReadPayloadOk
+  deriving (Show, Eq)
 
-  -- we only ever have one message in flight at a time
-  resp <- timeout 2000000 waitForResponse
+type MsgTypeMap a = JSON.Value -> String -> Parser a
+data MessageTypeMaps = TypeMaps (MsgTypeMap IncomingMessages) (MsgTypeMap OutgoingMessages)
 
-  case resp of
-    -- we sent the message successfully
-    Just _ -> do
-      -- traceM $ "acked message! " ++ show msg ++ " msgcount " ++ show msgCount
-      return ()
+mkParserFromTypeMap :: MsgTypeMap a -> JSON.Value -> Parser a
+mkParserFromTypeMap typeMap jsonVal =
+  withObject
+    "Message"
+    ( \o -> do
+        typ <- o .: "type"
+        typeMap jsonVal typ
+    )
+    jsonVal
 
-    -- we timed out waiting to send the message
-    Nothing -> do
-      -- traceShowM $ "timed out on ack for message " ++ show msg ++ " msgcount " ++ show msgCount
-      atomically $ do
-        unGetTQueue workQueue payload
-        -- clear out the inflight message
-        x <- tryTakeTMVar inflightMessage
-        case x of
-          Nothing -> error "should not happen"
-          Just _ -> return ()
+broadcastInputTypeMap :: MsgTypeMap IncomingMessages
+broadcastInputTypeMap jsonVal typ = case typ of
+  "echo" -> E <$> parseJSON jsonVal
+  -- "init" -> Init <$> parseJSON jsonVal
+  "generate" -> pure Generate
+  "topology" -> Topology <$> parseJSON jsonVal
+  "broadcast" -> Broadcast <$> parseJSON jsonVal
+  "read" -> pure Read
+  _ -> fail $ "unknown input type " <> typ
 
-  -- and now try send another message
-  nodeSender (msgCounter, senderNodeId, writeQueue) toNodeId ns
-  where
-    waitForResponse = atomically $ do
-      -- we wait for the response handler to empty out the tmvar
-      -- traceM "waiting on empty tvar"
-      isEmpty <- isEmptyTMVar inflightMessage
-      unless isEmpty retry
+broadcastOutputMap :: MsgTypeMap OutgoingMessages
+broadcastOutputMap jsonVal "echo_ok" = EchoOk <$> parseJSON jsonVal
+broadcastOutputMap _ "init_ok" = pure InitOk
+broadcastOutputMap jsonVal "generate_ok" = GenerateOk <$> parseJSON jsonVal
+broadcastOutputMap _ "topology_ok" = pure TopologyOk
+broadcastOutputMap _ "broadcast_ok" = pure BroadcastOk
+broadcastOutputMap _ typ = fail $ "unknown output type " <> typ
+
+broadcastTypeMap :: MessageTypeMaps
+broadcastTypeMap = TypeMaps broadcastInputTypeMap broadcastOutputMap
+
+raftInputTypeMap :: MsgTypeMap IncomingMessages
+raftInputTypeMap jsonVal "read" = RaftRead <$> parseJSON jsonVal
+
+instance {-# OVERLAPPING #-} (Reifies m (MessageTypeMaps)) => JSON.FromJSON (Tagged m IncomingMessages) where
+  parseJSON jsonVal = do
+    let (TypeMaps typeMap _) :: MessageTypeMaps = reflect (Proxy :: Proxy m)
+    let parser = mkParserFromTypeMap typeMap
+    x <- parser jsonVal
+    pure $ Tagged x
+
+instance {-# OVERLAPPING #-} (Reifies m (MessageTypeMaps)) => JSON.FromJSON (Tagged m OutgoingMessages) where
+  parseJSON jsonVal = do
+    let (TypeMaps _ typeMap) :: MessageTypeMaps = reflect (Proxy :: Proxy m)
+    let parser = mkParserFromTypeMap typeMap
+    x <- parser jsonVal
+    pure $ Tagged x
+
+toPairs :: OutgoingMessages -> [Pair]
+toPairs (EchoOk (Echo payload)) = ["echo" .= payload]
+toPairs InitOk = []
+toPairs (GenerateOk (GeneratePayload payload)) = ["id" .= payload]
+toPairs TopologyOk = []
+toPairs BroadcastOk = []
+toPairs (ReadOk (ReadPayload payload)) = ["messages" .= payload]
+
+toPairs2 :: IncomingMessages -> [Pair]
+toPairs2 (Broadcast payload) = ["message" .= broadcastMessage payload]
+toPairs2 _ = error "wat"
+
+messageTypeMapOut :: OutgoingMessages -> String
+messageTypeMapOut (EchoOk _) = "echo_ok"
+messageTypeMapOut InitOk = "init_ok"
+messageTypeMapOut (GenerateOk _) = "generate_ok"
+messageTypeMapOut TopologyOk = "topology_ok"
+messageTypeMapOut BroadcastOk = "broadcast_ok"
+messageTypeMapOut (ReadOk _) = "read_ok"
+
+messageTypeMapOut2 :: IncomingMessages -> String
+messageTypeMapOut2 (Broadcast _) = "broadcast"
+messageTypeMapOut2 _ = error "wat"
+

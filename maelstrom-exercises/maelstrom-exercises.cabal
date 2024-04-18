@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Broadcast
+      Broadcast.Router
       Echo
       Generate
       Handler
@@ -35,10 +36,14 @@ library
       Raft.Cas
       Raft.Read
       Raft.RequestVote
+      Raft.Router
       Raft.Write
       Read
+      Sender
       Server
+      Shared.Router
       Topology
+      Workload
   other-modules:
       Paths_maelstrom_exercises
   hs-source-dirs:
@@ -51,7 +56,12 @@ library
       OverloadedRecordDot
       ScopedTypeVariables
       FlexibleContexts
+      MultiParamTypeClasses
+      TypeFamilies
       UndecidableInstances
+      InstanceSigs
+      DataKinds
+      AllowAmbiguousTypes
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       aeson
@@ -59,7 +69,6 @@ library
     , base >=4.7 && <5
     , bytestring
     , containers
-    , ctrie
     , reflection
     , stm
     , tagged
@@ -67,7 +76,7 @@ library
     , unordered-containers
     , uuid
     , vector
-  default-language: Haskell2010
+  default-language: GHC2021
 
 executable maelstrom-exercises-exe
   main-is: Main.hs
@@ -83,7 +92,12 @@ executable maelstrom-exercises-exe
       OverloadedRecordDot
       ScopedTypeVariables
       FlexibleContexts
+      MultiParamTypeClasses
+      TypeFamilies
       UndecidableInstances
+      InstanceSigs
+      DataKinds
+      AllowAmbiguousTypes
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
@@ -91,7 +105,6 @@ executable maelstrom-exercises-exe
     , base >=4.7 && <5
     , bytestring
     , containers
-    , ctrie
     , maelstrom-exercises
     , reflection
     , stm
@@ -100,7 +113,7 @@ executable maelstrom-exercises-exe
     , unordered-containers
     , uuid
     , vector
-  default-language: Haskell2010
+  default-language: GHC2021
 
 test-suite maelstrom-exercises-test
   type: exitcode-stdio-1.0
@@ -117,7 +130,12 @@ test-suite maelstrom-exercises-test
       OverloadedRecordDot
       ScopedTypeVariables
       FlexibleContexts
+      MultiParamTypeClasses
+      TypeFamilies
       UndecidableInstances
+      InstanceSigs
+      DataKinds
+      AllowAmbiguousTypes
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       HUnit
@@ -126,7 +144,6 @@ test-suite maelstrom-exercises-test
     , base >=4.7 && <5
     , bytestring
     , containers
-    , ctrie
     , maelstrom-exercises
     , reflection
     , stm
@@ -135,4 +152,4 @@ test-suite maelstrom-exercises-test
     , unordered-containers
     , uuid
     , vector
-  default-language: Haskell2010
+  default-language: GHC2021

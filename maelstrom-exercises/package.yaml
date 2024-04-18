@@ -29,7 +29,6 @@ dependencies:
 - unordered-containers
 - stm
 - async
-- ctrie
 - vector
 - reflection
 - tagged
@@ -45,6 +44,8 @@ ghc-options:
 - -Wpartial-fields
 - -Wredundant-constraints
 
+default-language: "GHC2021"
+
 default-extensions:
 - DeriveGeneric
 - OverloadedStrings
@@ -53,9 +54,14 @@ default-extensions:
 - OverloadedRecordDot
 - ScopedTypeVariables
 - FlexibleContexts
+- MultiParamTypeClasses
+- TypeFamilies
 # - RankNTypes
 - UndecidableInstances # for reflection lib
 # - RebindableSyntax
+- InstanceSigs
+- DataKinds
+- AllowAmbiguousTypes
 
 library:
   source-dirs: src
