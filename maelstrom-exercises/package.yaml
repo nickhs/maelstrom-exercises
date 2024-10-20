@@ -44,7 +44,7 @@ ghc-options:
 - -Wpartial-fields
 - -Wredundant-constraints
 
-default-language: "GHC2021"
+language: "GHC2021"
 
 default-extensions:
 - DeriveGeneric
